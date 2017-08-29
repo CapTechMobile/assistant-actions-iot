@@ -1,34 +1,87 @@
 ### Android Things & The Google Assistant
 
-The attached project is a sample Android Things project to create your own Google Home like device. The device will respond to the activation phrase of "hey CapTech" and be able to process requests to the Assistant. The Assistant device will need a Google Cloud project set up and credentials to access user specific information. The steps to set up the project and create these credentials are below: 
+The attached project is a sample Android Things powered IoT device backed by the Google Assistant and controllable via Google Assistant Actions. The device will respond to the activation phrase of "hey CapTech Assistant" and be able to process requests to the Assistant. Any Assistant enabled device can request to speak to the IoT device by saying, "talk to CapTech Gardener." Via the assistant you can make requests like, "water my bonsai for 2 minutes" or "stop watering my plant." 
 
-- Enable the following [activity controls](https://myaccount.google.com/activitycontrols) in the Google Account you plan to use with the Assistant: Web & App Activity, Device Information, and Voice & Audio Activity. This will be the acccount you want to allow the Assistant retrieve information such as calendar events from. This does not have to be a developer account. 
-- In the Cloud Platform Console, go to the [Projects page](https://console.cloud.google.com/project). Select an existing project or create a new project.
-- Enable the [Google Assistant API](https://console.developers.google.com/apis/api/embeddedassistant.googleapis.com/overview) on the project you selected.
-- [Create an OAuth Client ID](https://console.developers.google.com/apis/credentials/oauthclient)
-- Click Other (select Other UI and User data if prompted) and give the client ID a name.
-- On the OAuth consent screen tab, give the product a name (don't use "Google" in the name) and a description.
-- Click ⬇ (at the far right of screen) for the client ID to download the client secret JSON file (client\_secret\_NNNN.json or client_id.json).
-- Open a terminal and install the google-auth-lib command line tool:
+The device needs to follow the setup guideline from my previous blog found here. You will then need to create a [Firebase Project](https://firebase.google.com/) with the following JSON structure for the database. 
 
-```
-$ pip install google-auth-oauthlib[tool] --user
-```
-- Navigate to your top-level project directory.
-- Use the google-oauthlib-tool command line tool to grant the permission to use the Assistant API to your application and create a new credentials.json file in your app resource directory.
+```json
+{
+  "bonsai_status" : {
+    "some_id" : {
+      "status_date" : 0,
+      "watering" : false,
+      "watering_duration" : 0
+    }
+  }
+}
 
 ```
-$ cd <project-directory-name>
-$ google-oauthlib-tool --client-secrets path/to/client_secret_NNNN.json \
-                       --credentials app/src/main/res/raw/credentials.json \
-                       --scope https://www.googleapis.com/auth/assistant-sdk-prototype \
-                       --save                       
+
+Next, create an [API.ai](https://console.api.ai/api-client/) project. Set up the Welcome, Watering, & Stop Watering intents as described in the attached blog. 
+
+Create and deploy an API.AI fulfillment endpoint to Cloud Functions.
+
+Download and install [node.js](https://nodejs.org/en/) and the [Firebase CLI](https://firebase.google.com/docs/cli/).
+If you do not already have these installed, download and install node.js and the Firebase CLI. Once installed, you should be able to run them from your command line like this to check their versions:
+
 ```
-- Replace path/to/client\_secret\_NNNN.json with the path of the JSON file you downloaded in step 10. 
+node --version
+```
+```
+firebase --version
+```
+In general, you should always make sure to keep the Firebase CLI up to date with the following command:
 
-The above steps will output the credentials file required.
+```
+npm install -g firebase-tools
+```
 
-Once you move past the prototyping phase, you can find details [here](https://developers.google.com/identity/protocols/OAuth2) on using OAuth 2.0 to Access Google APIs. 
+Create and initialize your Cloud Functions workspace
+Now, create a folder to hold your project:
+
+```
+mkdir firebase-assistant-codelab
+```
+
+```
+cd firebase-assistant-codelab
+```
+
+To authenticate and get access to your existing project:
+
+```
+firebase login
+```
+
+A window will appear requesting permissions. 
+
+```
+firebase init
+```
+
+You'll now have a "functions" directory ready to hold your code. There is a default index.js which is the entry point to your Cloud Functions code. Load it up in a code editor. You can overwrite the contents of this file by copying the [attached code](index.js) in its place. 
+
+
+This function responds to HTTPS requests to a dedicated host for your project. You can see that work after you deploy the code.
+
+This function also requires the Google Assistant node.js module, which needs to be installed into the project. Before deploying, you'll need up make sure the proper NPM modules are installed in the functions directory. Use npm to install the dependency in the functions/ directory:
+
+```
+cd functions
+npm install --save actions-on-google
+```
+
+
+Deploy the Cloud Functions code
+Every time you make changes to your functions, you will need to deploy that to the Google cloud with the following command:
+
+```
+firebase deploy
+```
+
+Use the generated URL in the webhook portions for your API.ai intents. 
+
+
 
 
 ### Required Hardware
@@ -36,14 +89,22 @@ Once you move past the prototyping phase, you can find details [here](https://de
 - Raspberry Pi 3 device with Android Things flashed on it
 - microphone, this project leverages this one from [Amazon](https://www.amazon.com/gp/product/B00IR8R7WQ/ref=oh_aui_detailpage_o06_s00?ie=UTF8&psc=1)
 - A standard speaker with 3.5mm headphone jack
+- 5v Relay [Amazon](https://www.amazon.com/gp/product/B00XT0OSUQ/ref=oh_aui_detailpage_o00_s00?ie=UTF8&psc=1)
+- Peristaltic Pump [Amazon](https://www.amazon.com/gp/product/B00HIX2PEG/ref=oh_aui_detailpage_o01_s00?ie=UTF8&psc=1)
 
-![hardware setup](demo_pic_setup.jpg)
+![hardware setup](graphics/IMG_20170826_125038.jpg)
 
-### Expected Lighting
-![lighting setup](Assistant_Lights.png)
+### Expected Wiring
+![lighting setup](graphics/assistant_irrigation.png)
+
 
 ### Demo
-[![IMAGE ALT TEXT HERE](demo_video_play.png)](https://goo.gl/photos/M82Cm7wynWDL9ppZ7)
+#### Start Watering
+[![IMAGE ALT TEXT HERE](graphics/demo_video_play.png)](https://goo.gl/photos/FzQTve6USgGkdUre7)
+
+#### Stop Watering
+
+[![IMAGE ALT TEXT HERE](graphics/demo_video_play.png)](https://goo.gl/photos/ESCMXL1qWCe2vqabA)
 
 ### License
 

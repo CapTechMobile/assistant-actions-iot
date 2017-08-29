@@ -8,13 +8,14 @@ import android.media.AudioRecord;
 import android.media.AudioTrack;
 import android.media.MediaRecorder;
 import android.os.Bundle;
+import android.os.CountDownTimer;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.support.annotation.Nullable;
 import android.util.Log;
 
-import com.google.android.things.pio.Gpio;
-import com.google.android.things.pio.PeripheralManagerService;
+import com.captech.teegarden.captechassistant.data.BonsaiStatus;
+import com.captech.teegarden.captechassistant.peripherals.SimpleGPIO;
 import com.google.assistant.embedded.v1alpha1.AudioInConfig;
 import com.google.assistant.embedded.v1alpha1.AudioOutConfig;
 import com.google.assistant.embedded.v1alpha1.ConverseConfig;
@@ -22,6 +23,11 @@ import com.google.assistant.embedded.v1alpha1.ConverseRequest;
 import com.google.assistant.embedded.v1alpha1.ConverseResponse;
 import com.google.assistant.embedded.v1alpha1.ConverseState;
 import com.google.assistant.embedded.v1alpha1.EmbeddedAssistantGrpc;
+import com.google.firebase.database.ChildEventListener;
+import com.google.firebase.database.DataSnapshot;
+import com.google.firebase.database.DatabaseError;
+import com.google.firebase.database.DatabaseReference;
+import com.google.firebase.database.FirebaseDatabase;
 import com.google.protobuf.ByteString;
 
 import org.json.JSONException;
@@ -57,11 +63,16 @@ public class CapTechAssistant extends Activity implements CapTechSphinxManager.S
 
     private static String TAG = "CapTechAssistant";
     //GPIO Constants
+    private static final String PUMP_GPIO = "BCM4";
     private static final String BLUE_LIGHT = "BCM6";
     private static final String RED_LIGHT = "BCM26";
+
+
+    private SimpleGPIO pump, blue, red;
+
     //light status flags
-    private boolean blueLightOn, redLightOn;
     private Timer blinkingTimer;
+    private CountDownTimer wateringTimer;
 
     // Google Assistant API constants.
     private static final String ASSISTANT_ENDPOINT = "embeddedassistant.googleapis.com";
@@ -125,12 +136,30 @@ public class CapTechAssistant extends Activity implements CapTechSphinxManager.S
     //pocket sphinx for hot key
     private CapTechSphinxManager captechSphinxManager;
 
+    private FirebaseDatabase assistantDatabase;
+    private DatabaseReference bonsaiData;
+    private BonsaiStatus currentStatus;
+
+
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        assistantDatabase = FirebaseDatabase.getInstance();
+        assistantDatabase.setPersistenceEnabled(true);
+        bonsaiData = assistantDatabase.getReference("bonsai_status");
+        bonsaiListener();
+
+
         //ensure they are off
-        toggleBlueLight(false);
-        toggleRedLight(false);
+        try {
+            red = new SimpleGPIO(RED_LIGHT, SimpleGPIO.InitialState.OFF);
+            blue = new SimpleGPIO(BLUE_LIGHT, SimpleGPIO.InitialState.OFF);
+            pump = new SimpleGPIO(PUMP_GPIO, SimpleGPIO.InitialState.OFF);
+        } catch (Exception ignored) {
+
+        }
+
+
         //build & start our assistant thread
         mMainHandler = new Handler(getMainLooper());
         mAssistantThread = new HandlerThread("assistantThread");
@@ -146,6 +175,7 @@ public class CapTechAssistant extends Activity implements CapTechSphinxManager.S
         ManagedChannel channel = ManagedChannelBuilder.forTarget(ASSISTANT_ENDPOINT).build();
         try {
             mAssistantService = EmbeddedAssistantGrpc.newStub(channel)
+                    .withWaitForReady()
                     .withCallCredentials(MoreCallCredentials.from(
                             Credentials.fromResource(this, R.raw.credentials)
                     ));
@@ -161,29 +191,34 @@ public class CapTechAssistant extends Activity implements CapTechSphinxManager.S
                     @Override
                     public void onNext(ConverseResponse value) {
                         switch (value.getConverseResponseCase()) {
+
                             case EVENT_TYPE:
                                 Log.d(TAG, "converse response event: " + value.getEventType());
-                                if (value.getEventType() == ConverseResponse.EventType.END_OF_UTTERANCE)
-                                    mAssistantHandler.post(mStopAssistantRequest);
+                                if (value.getEventType() == ConverseResponse.EventType.END_OF_UTTERANCE) {
+                                    mAssistantHandler.removeCallbacks(mStreamAssistantRequest);
+                                    mAudioRecord.stop();
+                                }
+
                                 break;
                             case RESULT:
                                 mConversationState = value.getResult().getConversationState();
-                                Log.d(TAG, value.getResult().toString());
-                                mAssistantHandler.post(mStopAssistantRequest);
-
                                 //this method will take care of if there was a volume request or not.
+                                mAssistantHandler.post(mStopAssistantRequest);
                                 adjustVolume(value.getResult().getVolumePercentage());
+
                                 break;
                             case AUDIO_OUT:
                                 //the assistant wants to talk!
                                 final ByteBuffer audioData =
                                         ByteBuffer.wrap(value.getAudioOut().getAudioData().toByteArray());
                                 mAudioTrack.write(audioData, audioData.remaining(), AudioTrack.WRITE_BLOCKING);
+
                                 break;
                             case ERROR:
                                 mAssistantHandler.post(mStopAssistantRequest);
                                 Log.e(TAG, "converse response error: " + value.getError());
                                 break;
+
                         }
                     }
 
@@ -196,6 +231,14 @@ public class CapTechAssistant extends Activity implements CapTechSphinxManager.S
                     @Override
                     public void onCompleted() {
                         Log.d(TAG, "assistant response finished");
+                        //add slight gap to ensure the requests are done.
+                        mAssistantHandler.postDelayed(new Runnable() {
+                            @Override
+                            public void run() {
+                                captechSphinxManager.startListeningToActivationPhrase();
+                            }
+                        }, 500);
+
 
                     }
                 };
@@ -207,6 +250,11 @@ public class CapTechAssistant extends Activity implements CapTechSphinxManager.S
     @Override
     protected void onDestroy() {
         super.onDestroy();
+
+        if (wateringTimer != null) {
+            wateringTimer.cancel();
+            wateringTimer = null;
+        }
 
         stopBlinking();
 
@@ -220,6 +268,24 @@ public class CapTechAssistant extends Activity implements CapTechSphinxManager.S
         if (mAudioTrack != null) {
             mAudioTrack.stop();
             mAudioTrack = null;
+        }
+
+        try {
+            red.close();
+        } catch (Exception ignored) {
+            red = null;
+        }
+
+        try {
+            blue.close();
+        } catch (Exception ignored) {
+            blue = null;
+        }
+
+        try {
+            pump.close();
+        } catch (Exception ignored) {
+            pump = null;
         }
 
         mAssistantHandler.post(() -> mAssistantHandler.removeCallbacks(mStreamAssistantRequest));
@@ -338,17 +404,13 @@ public class CapTechAssistant extends Activity implements CapTechSphinxManager.S
             //stop recording the user
             mAudioRecord.stop();
 
-            //start telling the user what the Assistant has to say.
-            mAudioTrack.play();
-
-            //okay we can activate via keyphrase again
-            captechSphinxManager.startListeningToActivationPhrase();
 
             //stop the blinking lights.
             stopBlinking();
 
             //show blue light to indicate we are ready for another request.
-            toggleBlueLight(true);
+            blue.toggleGPIO(true);
+
         };
     }
 
@@ -358,7 +420,7 @@ public class CapTechAssistant extends Activity implements CapTechSphinxManager.S
         Log.d(TAG, "Speech Recognition Ready");
         captechSphinxManager.startListeningToActivationPhrase();
         //lets show a blue light to indicate we are ready.
-        toggleBlueLight(true);
+        blue.toggleGPIO(true);
     }
 
     @Override
@@ -367,43 +429,6 @@ public class CapTechAssistant extends Activity implements CapTechSphinxManager.S
         mAssistantHandler.post(mStartAssistantRequest);
     }
 
-    /**
-     * Toggle the blue light on and off based on parameter.
-     *
-     * @param on
-     */
-    private void toggleBlueLight(boolean on) {
-        PeripheralManagerService pioService = new PeripheralManagerService();
-        try {
-            Gpio ledGpio = pioService.openGpio(BLUE_LIGHT);
-            ledGpio.setDirection(Gpio.DIRECTION_OUT_INITIALLY_LOW);
-            ledGpio.setValue(on);
-            blueLightOn = on;
-            ledGpio.close();
-
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
-
-    /**
-     * Toggle the red light on and off based on parameter.
-     *
-     * @param on
-     */
-    private void toggleRedLight(boolean on) {
-        PeripheralManagerService pioService = new PeripheralManagerService();
-        try {
-            Gpio ledGpio = pioService.openGpio(RED_LIGHT);
-            ledGpio.setDirection(Gpio.DIRECTION_OUT_INITIALLY_LOW);
-            ledGpio.setValue(on);
-            redLightOn = on;
-            ledGpio.close();
-
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
 
     /**
      * Start the blinking lights. We will alternate red and blue lights every .5 seconds
@@ -413,8 +438,8 @@ public class CapTechAssistant extends Activity implements CapTechSphinxManager.S
         TimerTask mTimerTask = new TimerTask() {
             @Override
             public void run() {
-                toggleRedLight(!redLightOn);
-                toggleBlueLight(!blueLightOn);
+                red.toggleGPIO(!red.isOn());
+                blue.toggleGPIO(!blue.isOn());
             }
         };
 
@@ -429,8 +454,69 @@ public class CapTechAssistant extends Activity implements CapTechSphinxManager.S
             blinkingTimer.cancel();
 
         //turn both lights off.
-        toggleBlueLight(false);
-        toggleRedLight(false);
+        red.toggleGPIO(false);
+        blue.toggleGPIO(false);
     }
+
+
+    private void bonsaiListener() {
+
+        bonsaiData.addChildEventListener(new ChildEventListener() {
+            @Override
+            public void onChildAdded(DataSnapshot dataSnapshot, String s) {
+                currentStatus = BonsaiStatus.getStatusFromSnapShot(dataSnapshot);
+                pump.toggleGPIO(currentStatus.watering);
+                if (wateringTimer != null) {
+                    wateringTimer.cancel();
+                    wateringTimer = null;
+                }
+
+                if (currentStatus.watering) {
+                    //water for a specific amount of time.
+                    wateringTimer = new CountDownTimer(currentStatus.watering_duration, currentStatus.watering_duration) {
+                        @Override
+                        public void onTick(long millisUntilFinished) {
+
+                        }
+
+                        @Override
+                        public void onFinish() {
+                            wateringTimer.cancel();
+                            pump.toggleGPIO(false);
+                            wateringTimer = null;
+                            BonsaiStatus stopStatus = new BonsaiStatus();
+                            stopStatus.watering = false;
+                            stopStatus.statusDate = System.currentTimeMillis();
+                            stopStatus.watering_duration = 0;
+                            bonsaiData.push().setValue(stopStatus);
+
+
+                        }
+                    };
+                }
+            }
+
+            @Override
+            public void onChildChanged(DataSnapshot dataSnapshot, String s) {
+                //not using
+            }
+
+            @Override
+            public void onChildRemoved(DataSnapshot dataSnapshot) {
+                //not using
+            }
+
+            @Override
+            public void onChildMoved(DataSnapshot dataSnapshot, String s) {
+                //not using
+            }
+
+            @Override
+            public void onCancelled(DatabaseError databaseError) {
+                //not using
+            }
+        });
+    }
+
 
 }

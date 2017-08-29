@@ -43,7 +43,7 @@ public class CapTechSphinxManager implements RecognitionListener {
         void onActivationPhraseDetected();
     }
 
-    private static final String ACTIVATION_KEYPHRASE = "hey cap tech";
+    private static final String ACTIVATION_KEYPHRASE = "hey cap tech assistant";
     private static final String WAKEUP_SEARCH = "wakeup";
 
     private final SphinxListener mSphinxListener;
@@ -151,6 +151,9 @@ public class CapTechSphinxManager implements RecognitionListener {
         mSpeechRecognizer.startListening(WAKEUP_SEARCH);
     }
 
+    public void stopRecognition(){
+        mSpeechRecognizer.stop();
+    }
 
     public void destroy() {
         if (mSpeechRecognizer != null) {

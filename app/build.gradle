@@ -1,6 +1,7 @@
 apply plugin: 'com.android.application'
 apply plugin: 'com.google.protobuf'
 
+
 android {
     compileSdkVersion rootProject.ext.compileSdkVersion
     buildToolsVersion rootProject.ext.buildToolsVersion
@@ -19,16 +20,10 @@ android {
 
     signingConfigs {
         release{
-            keyAlias 'captech'
-            keyPassword 'captech'
-            storeFile file('keys/AssistantKey.jks')
-            storePassword 'captech'
+
         }
         debug{
-            keyAlias 'captech'
-            keyPassword 'captech'
-            storeFile file('keys/AssistantKey.jks')
-            storePassword 'captech'
+
         }
     }
     buildTypes {
@@ -78,6 +73,9 @@ dependencies {
     compile 'com.android.support:appcompat-v7:25.3.1'
     testCompile 'junit:junit:4.12'
 
+    compile 'com.google.firebase:firebase-core:11.0.4'
+    compile 'com.google.firebase:firebase-database:11.0.4'
+
     provided 'com.google.android.things:androidthings:0.4-devpreview'
     compile 'edu.cmu.pocketsphinx:pocketsphinx-android:5prealpha-release@aar'
     compile 'io.grpc:grpc-okhttp:1.2.0'
@@ -91,3 +89,5 @@ dependencies {
     compile 'com.google.android.things.contrib:driver-button:0.2'
 
 }
+
+apply plugin: 'com.google.gms.google-services'
