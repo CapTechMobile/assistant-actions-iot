@@ -473,7 +473,7 @@ public class CapTechAssistant extends Activity implements CapTechSphinxManager.S
 
                 if (currentStatus.watering) {
                     //water for a specific amount of time.
-                    wateringTimer = new CountDownTimer(currentStatus.watering_duration, currentStatus.watering_duration) {
+                    wateringTimer = new CountDownTimer(currentStatus.watering_duration*1000, currentStatus.watering_duration*1000) {
                         @Override
                         public void onTick(long millisUntilFinished) {
 
@@ -493,6 +493,7 @@ public class CapTechAssistant extends Activity implements CapTechSphinxManager.S
 
                         }
                     };
+                    wateringTimer.start();
                 }
             }
 

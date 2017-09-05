@@ -55,7 +55,7 @@ exports.assistantcodelab = functions.https.onRequest((request, response) => {
                timeInSeconds = numberTime *60*60;
                break;
            case "s":
-               timeInSeconds = unitTime;
+               timeInSeconds = numberTime;
                break;
            default:
                timeInSeconds = numberTime * 60;//default to unit being minutes
